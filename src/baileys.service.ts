@@ -1,30 +1,33 @@
-import * as baileys from '@whiskeysockets/baileys'
+import makeWASocket from '@whiskeysockets/baileys'
+import { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys'
+import type { ConnectionState, proto, WASocket } from '@whiskeysockets/baileys'
 import type { Boom } from '@hapi/boom'
 
 export class BaileysService {
-  private conn: baileys.WASocket | null = null
+  private conn: WASocket | null = null
   private retries: number = 0
+  private readonly name: string
 
-  constructor(private readonly session: string) {}
-
-  public async init(): Promise<void> {
-    await this.startConn()
+  constructor({ name }: { name: string }) {
+    this.name = name
   }
 
-  private async startConn(): Promise<void> {
+  private async startConn(): Promise<WASocket> {
     try {
-      const { state, saveCreds } = await baileys.useMultiFileAuthState(this.session)
+      const { state, saveCreds } = await useMultiFileAuthState(this.name)
 
-      this.conn = baileys.default({
+      const conn = makeWASocket({
         auth: state,
         printQRInTerminal: true
       })
 
-      this.conn.ev.on('connection.update', this.handleConnectionUpdate.bind(this))
+      conn.ev.on('connection.update', this.handleConnection.bind(this))
 
-      this.conn.ev.on('creds.update', saveCreds)
+      conn.ev.on('creds.update', saveCreds)
 
       console.log('Connection initialized successfully')
+
+      return conn
     } catch (error) {
       console.error('Failed to start connection:', error)
       
@@ -32,12 +35,12 @@ export class BaileysService {
     }
   }
 
-  private async handleConnectionUpdate(update: Partial<baileys.ConnectionState>): Promise<void> {
+  private async handleConnection(update: Partial<ConnectionState>): Promise<void> {
     const { connection, lastDisconnect } = update
 
     if (connection === 'close') {
       const lastError = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
-      const shouldReconnect = lastError !== baileys.DisconnectReason.loggedOut
+      const shouldReconnect = lastError !== DisconnectReason.loggedOut
 
       console.log('Connection closed, reconnecting...', shouldReconnect)
 
@@ -55,29 +58,54 @@ export class BaileysService {
     }
   }
 
-  // public async sendMessage(to: string, message: string): Promise<void> {
-  //   if (!this.conn) {
-  //     throw new Error('Connection is not initialized')
-  //   }
+  public async sendMessage(): Promise<void> {
+    try {
+      const conn = await this.startConn()
 
-  //   if (this.conn.ws.readyState !== WebSocket.OPEN) {
-  //     console.log('WebSocket is not open. Reconnecting...')
+      conn.ev.on("messages.upsert", async ({ messages, type }) => {
+        try {
+          if (type === "notify") {
+            if (!messages[0]?.key.fromMe) {
+              const captureMessage = messages[0]?.message?.conversation;
+              const numberWa = messages[0]?.key?.remoteJid;
+    
+              const compareMessage = captureMessage?.toLowerCase()
+    
+              if (compareMessage === "ping") {
+                await conn.sendMessage(
+                  numberWa as string,
+                  {
+                    text: "Pong",
+                  },
+                  {
+                    quoted: messages[0],
+                  }
+                );
+              } else {
+                await conn.sendMessage(
+                  numberWa as string,
+                  {
+                    text: "Soy un robot",
+                  },
+                  {
+                    quoted: messages[0],
+                  }
+                )
+              }
+            }
+          }
+        } catch (error) {
+          console.log("error ", error)
+        }
+      })
 
-  //     await this.startConn()
-  //   }
+      console.log('Message sent successfully')
+    } catch (error) {
+      console.error('Failed to send message:', error)
 
-  //   try {
-  //     const jid = `${to}@s.whatsapp.net`
-
-  //     const response = await this.conn.sendMessage(jid, { text: message })
-
-  //     console.log('Message sent successfully:', response)
-  //   } catch (error) {
-  //     console.error('Failed to send message:', error)
-
-  //     throw new Error('Message sending failed')
-  //   }
-  // }
+      throw new Error('Message sending failed')
+    }
+  }
 
   public async logout(): Promise<void> {
     if (this.conn) {

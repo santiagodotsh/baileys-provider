@@ -1,17 +1,14 @@
 import { BaileysService } from './baileys.service'
 
+const whatsapp1 = new BaileysService({ name: 'chatbot' })
+const whatsapp2 = new BaileysService({ name: 'chatbot2' })
+
 async function main() {
-  const whatsapp = new BaileysService('my-session')
-
   try {
-    await whatsapp.init()
-
-    // const recipient = ''
-    // const message = 'Hello from WhatsApp API!'
-
-    // await whatsapp.sendMessage(recipient, message)
+    await whatsapp1.sendMessage()
+    await whatsapp2.sendMessage()
   } catch (error) {
-    console.error('Error initializing the service:', error)
+    console.error(error)
   }
 }
 
